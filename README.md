@@ -12,7 +12,7 @@ Please report any issues you see on the project's Github page. I welcome any fee
 
 ## Installation
 
-Download from Release folder [Release Folder](https://github.com/f00d4tehg0dz/starcitizen-server-status-plugin-for-elgato-streamdeck/Release/com.f00d4tehg0dz.starcitizen.streamDeckPlugin)
+Download from Release folder [Release Folder](Release/com.f00d4tehg0dz.starcitizen.streamDeckPlugin)
 
 Double click to install to StreamDeck. 
 

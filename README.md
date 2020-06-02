@@ -6,7 +6,7 @@ This an extension for the [ElGato-StreamDeck](https://www.elgato.com/en/gaming/s
 
 ## Screenshot
 
-![screencap.png](doc/screencap.png)
+![screencap.png](doc/screencap.PNG)
 
 Please report any issues you see on the project's Github page. I welcome any feedback.
 

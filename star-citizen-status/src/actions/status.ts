@@ -27,7 +27,7 @@ export class Status extends SingletonAction<StatusSettings> {
         const username = settings.username || "Chris-Roberts";
         const shipInfo = settings.shipInfo || "100i";
         this.updateDisplay(settings, ev.action);
-        await this.refreshStarCitizenData(settings.fields || [], username, shipInfo, settings.displayMode || (''), ev.action);
+        //await this.refreshStarCitizenData(settings.fields || [], username, shipInfo, settings.displayMode || (''), ev.action);
     }
 
     /**
@@ -39,7 +39,7 @@ export class Status extends SingletonAction<StatusSettings> {
         const username = settings.username || "Chris-Roberts";
         const shipInfo = settings.shipInfo || "100i";
         this.updateDisplay(ev.payload.settings, ev.action);
-        await this.refreshStarCitizenData(settings.fields || [], username, shipInfo, settings.displayMode || (''), ev.action);
+        //await this.refreshStarCitizenData(settings.fields || [], username, shipInfo, settings.displayMode || (''), ev.action);
     }
 
     /**
@@ -60,7 +60,7 @@ export class Status extends SingletonAction<StatusSettings> {
      */
     private updateDisplay(settings: StatusSettings, action: KeyAction<StatusSettings>) {
         const title = settings.displayMode || 'N/A';
-        action.setTitle(title);
+        //action.setTitle(title);
     }
 
     /**

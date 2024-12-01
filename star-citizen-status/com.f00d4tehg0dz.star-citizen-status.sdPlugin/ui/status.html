@@ -21,10 +21,10 @@
         <sdpi-button id="updateBtn">Update</sdpi-button>
     </sdpi-item>
 
-    <!-- <sdpi-item label="Username">
+    <sdpi-item label="Username">
         <sdpi-textfield id="username" setting="username" placeholder="Enter Username"></sdpi-textfield>
         <sdpi-button id="usernameBtn">Search</sdpi-button>
-    </sdpi-item> -->
+    </sdpi-item>
 
     <sdpi-item label="Ship Photo">
         <sdpi-textfield id="shipInfo" setting="shipInfo" placeholder="Enter Ship Info"></sdpi-textfield>
@@ -39,7 +39,7 @@
             const displayModeSelect = document.getElementById('field0');
             const usernameSelect = document.getElementById('username');
             const shipInfoSelect = document.getElementById('shipInfo');
-            //const usernameButton = document.getElementById('usernameBtn');
+            const usernameButton = document.getElementById('usernameBtn');
             const shipInfoButton = document.getElementById('shipInfoBtn');
             const updateButton = document.getElementById('updateBtn');
 
@@ -64,27 +64,27 @@
                 console.error("Update button not found");
             }
 
-            // if (usernameButton) {
-            //     usernameButton.addEventListener('click', function () {
-            //         if (usernameSelect) {
-            //             const selectedValue = usernameSelect.value;
-            //             const settings = {
-            //                 username: selectedValue,
-            //                 displayMode: 'username',
-            //                 // Add other settings if needed
-            //             };
+            if (usernameButton) {
+                usernameButton.addEventListener('click', function () {
+                    if (usernameSelect) {
+                        const selectedValue = usernameSelect.value;
+                        const settings = {
+                            username: selectedValue,
+                            displayMode: 'username',
+                            // Add other settings if needed
+                        };
 
-            //             console.log("Updating settings with display mode:", selectedValue);
-            //             // Send the updated settings to the plugin
-            //             const { streamDeckClient } = SDPIComponents;
-            //             streamDeckClient.setSettings(settings);
-            //         } else {
-            //             console.error("Dropdown element not found");
-            //         }
-            //     });
-            // } else {
-            //     console.error("Update button not found");
-            // }
+                        console.log("Updating settings with display mode:", selectedValue);
+                        // Send the updated settings to the plugin
+                        const { streamDeckClient } = SDPIComponents;
+                        streamDeckClient.setSettings(settings);
+                    } else {
+                        console.error("Dropdown element not found");
+                    }
+                });
+            } else {
+                console.error("Update button not found");
+            }
 
             if (shipInfoButton) {
                 shipInfoButton.addEventListener('click', function () {

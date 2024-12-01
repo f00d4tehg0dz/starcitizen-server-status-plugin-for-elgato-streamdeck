@@ -31,12 +31,9 @@ streamDeck.settings.onDidReceiveSettings((jsonObj) => {
 
 streamDeck.actions.onWillAppear((jsonObj) => {
     //streamDeck.logger.trace("On Will Appear", jsonObj);
-    const settings = jsonObj.payload.settings;
-    streamDeck.logger.trace("Settings on will appear:", jsonObj.payload.settings);
-    initiateStarCitizenStatus(settings);
-});
-
-streamDeck.ui.onDidAppear((jsonObj) => {
+    // const settings = jsonObj.payload.settings;
+    // streamDeck.logger.trace("Settings on will appear:", jsonObj.payload.settings);
+    // initiateStarCitizenStatus(settings);
     streamDeck.logger.trace("On Did Appear", jsonObj);
     const settings = jsonObj.action.getSettings()
     const lastState = loadLastState(settings);
@@ -46,8 +43,20 @@ streamDeck.ui.onDidAppear((jsonObj) => {
     } else {
         displayErrorMessage("Something Broke");
     }
-
 });
+
+// streamDeck.ui.onDidAppear((jsonObj) => {
+//     streamDeck.logger.trace("On Did Appear", jsonObj);
+//     const settings = jsonObj.action.getSettings()
+//     const lastState = loadLastState(settings);
+//     if (lastState) {
+//         streamDeck.logger.trace("Loading last state:", lastState);
+//         updateCanvasWithStatus(lastState.result, settings, false);
+//     } else {
+//         displayErrorMessage("Something Broke");
+//     }
+
+// });
 
 streamDeck.actions.onKeyUp((jsonObj) => {
     streamDeck.logger.trace("Received keyUp event:", jsonObj);
@@ -221,7 +230,7 @@ function drawBackground(ctx: any) {
 }
 
 function drawErrorMessage(ctx: any, message: string) {
-    ctx.fillStyle = 'red';
+    ctx.fillStyle = '#969AE8';
     ctx.font = 'bold 20pt SourceSansPro';
     ctx.clearRect(0, 0, 144, 144);
     ctx.fillText(message, 72, 50);
@@ -231,22 +240,38 @@ function drawErrorMessage(ctx: any, message: string) {
 function drawHeaderText(ctx: any) {
     ctx.fillStyle = 'white';
     ctx.textAlign = 'center';
-    ctx.fillText("Status", 72, 30); // Centered at the top
-    //ctx.fillText("Status", 72, 50); // Centered below the first line
+    ctx.fillText("Status", 72, 30); // Cente#969AE8 at the top
+    //ctx.fillText("Status", 72, 50); // Cente#969AE8 below the first line
 }
+
 function drawStatusText(ctx: any, lines: any[]) {
     ctx.fillStyle = 'black'; // Default text color
     ctx.font = "24pt 'SourceSansPro'"; // Set font style
     ctx.textAlign = 'left'; // Align text to the left
 
-    lines.forEach(({ text, color }, i) => {
+    // Define the color profile mapping
+    const colorProfile: { [key: string]: string } = {
+        "degraded": "#969AE8", // purple
+        "operational": "rgb(81, 174, 122)", // green
+        "maintenance": "#aab5bb", // grey
+        "partial": "#e8944a" // orange
+    };
+
+    lines.forEach(({ text, color, imageUrl }, i) => {
         if (text) {
-            ctx.fillStyle = color; // Set text color
-            ctx.fillText(text, 10, 60 + 30 * i); // Draw text starting below the header
+            // Determine the color based on the text content
+            const lowerText = text.toLowerCase();
+            const textColor = colorProfile[lowerText] || color; // Use default color if no match
+
+            ctx.fillStyle = textColor; // Set text color
+            ctx.fillText(text, 12, 60 + 30 * i); // Draw text starting below the header
         }
-       
+        if (imageUrl) {
+            // Handle image drawing logic here if needed
+        }
     });
 }
+
 // Utility function to convert a Fetch API ReadableStream to a Node.js Readable stream
 function fetchToNodeReadable(fetchStream: ReadableStream<Uint8Array>): Readable {
     const reader = fetchStream.getReader();
@@ -262,23 +287,23 @@ function fetchToNodeReadable(fetchStream: ReadableStream<Uint8Array>): Readable 
     });
 }
 
-
 function prepareStatusLines(result: any, fields: string[], settings: any) {
     if (settings.displayMode === 'stats') {
         return [
-            { text: `Live: ${result.current_live || 'N/A'}`, color: "#008000" },
-            { text: `Fans: ${result.fans || 'N/A'}`, color: "yellow" },
-            { text: `Funds: ${result.funds || 'N/A'}`, color: "red" }
+            { text: `Live: ${result.current_live || 'N/A'}`, color: "rgb(81, 174, 122)" },
+            { text: `Fans: ${result.fans || 'N/A'}`, color: "#e8944a" },
+            { text: `Funds: ${result.funds || 'N/A'}`, color: "#969AE8" }
         ];
     } else if (settings.displayMode === 'status') {
         return Object.keys(result).map(systemName => {
             const status = result[systemName] || 'N/A';
-            return { text: `${status}`, color: "#008000" };
+            return { text: `${status}`, color: "rgb(81, 174, 122)" };
         });
     } else if (settings.displayMode === 'username') {
     return [
-        { text: `${result.username || 'N/A'}`, color: "#008000" },
-        { imageUrl: `${result.imageUrl || 'N/A'}` , color: "yellow" }, // Ensure imageUrl is set correctly
+        { text: `${result.username || 'N/A'}`, color: "rgb(81, 174, 122)" },
+        { text: `${result.badge || 'N/A'}` , color: "#e8944a" },
+        { text: `${result.organization || 'N/A'}` , color: "#969AE8" },
     ];
 }
 
@@ -332,10 +357,13 @@ function getUsernameData(username: string, callback: (result: any) => void) {
         .then(data => {
             if (data.success) {
                 const userProfile = data.data.profile;
-                const userImage = userProfile.image; // Extract the user's profile image URL
+                const userBadge = userProfile.badge;
+                const userOrg = data.data.organization.name;
+                //  const userImage = userProfile.image; // Extract the user's profile image URL
 
                 // Pass the image URL directly to the callback
-                callback({ username, imageUrl: userImage });
+                callback({ username, badge: userBadge, organization: userOrg });
+                //callback({ username, imageUrl: userImage });
             } else {
                 callback({ error: "User not found" });
             }

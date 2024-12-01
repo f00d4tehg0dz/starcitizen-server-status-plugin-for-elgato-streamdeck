@@ -1,0 +1,47 @@
+{
+	"Name": "Star Citizen Status",
+	"Version": "0.1.0.0",
+	"Author": "f00d4tehg0dz",
+	"Actions": [
+		{
+			"Name": "Status",
+			"UUID": "com.f00d4tehg0dz.star-citizen-status.status",
+			"Icon": "imgs/actions/status/icon",
+			"Tooltip": "Display a Status and more from Star Citizen with a button press.",
+			"PropertyInspectorPath": "ui/status.html",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/status/key",
+					"TitleAlignment": "middle"
+				}
+			]
+		}
+	],
+	"Category": "Star Citizen Status",
+	"CategoryIcon": "imgs/plugin/category-icon",
+	"CodePath": "bin/plugin.js",
+	"Description": "Server Status and more for Star Citizen",
+	"Icon": "imgs/plugin/marketplace",
+	"SDKVersion": 2,
+	"Software": {
+		"MinimumVersion": "6.4"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "10.15"
+		},
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"Nodejs": {
+		"Version": "20",
+		"Debug": "enabled"
+	},
+	"UUID": "com.f00d4tehg0dz.star-citizen-status"
+}

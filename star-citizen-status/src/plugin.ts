@@ -2,7 +2,7 @@ import streamDeck, { LogLevel } from "@elgato/streamdeck";
 import * as PImage from "pureimage";
 import * as fs from "fs";
 import { PassThrough } from "stream";
-
+import { Readable } from 'stream';
 import { Status } from "./actions/status";
 
 // Enable "trace" logging
@@ -18,6 +18,8 @@ streamDeck.connect().then(() => {
 });
 
 const Star_Citizen_Key = ""
+
+let intervals: { [key: string]: ReturnType<typeof setInterval> } = {};
 let stateStore: { [key: string]: any } = {}; // In-memory state store
 
 streamDeck.settings.onDidReceiveSettings((jsonObj) => {
@@ -140,81 +142,81 @@ const font = PImage.registerFont("./font/source-sans-pro-regular.ttf", "SourceSa
 font.loadSync();
 
 function updateCanvasWithStatus(result: any, settings: any, isNew: boolean) {
-    //streamDeck.logger.trace("Updating canvas with status:", result);
     const statusLines = prepareStatusLines(result, settings.fields, settings);
-    
-    // Create a new bitmap image
-    const canvas = PImage.make(144, 144); // Adjust dimensions as needed
+    const canvas = PImage.make(144, 144);
     const ctx = canvas.getContext('2d');
- 
+
     if (ctx) {
-        // Clear the canvas before drawing
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw background if needed
-        drawBackground(ctx);
-
-        // Set font and draw header text
         ctx.font = "20pt 'SourceSansPro'";
+
         drawHeaderText(ctx);
-
-        streamDeck.logger.error("111Error fetching data:", statusLines);
-
         // Draw status text
         drawStatusText(ctx, statusLines);
-        
-       // Convert canvas to base64 and set image
-       const outStream = new PassThrough();
-       const jpegData: Buffer[] = []; // Initialize as an empty array
-       //drawImageFromUrl(ctx, imageUrl); // Call the function without assignment
-       if (result.image) { 
-        const ctx = result.image.getContext('2d');
-        if (ctx) {
-            // Perform any additional drawing or manipulation here if needed
-            streamDeck.ui.current?.action.setImage(result.image); // Directly set the PImage object
-        }
-    } else {
-        streamDeck.logger.error("No image available to display");
-    }
-       outStream.on('data', (chunk) => jpegData.push(chunk));
-       outStream.on('end', () => {
-           const buf = Buffer.concat(jpegData);
-           const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
-           
-           PImage.decodePNGFromStream(new PassThrough().end(buf))
-           .then((decodedImage) => {
-               ctx.drawImage(decodedImage, 0, 0, 144, 144);
-                   streamDeck.logger.trace("Generated data URL for Stream Deck:", dataUrl); // Debugging line
-                   streamDeck.ui.current?.action.setImage(dataUrl);
-               })
-               .catch(err => {
-                   streamDeck.logger.error("Error decoding image from data URL:", err);
-               });
-       });
-   
-       PImage.encodePNGToStream(canvas, outStream).catch(err => {
-           streamDeck.logger.error("Error encoding PNG to stream:", err); // Debugging line
-       });
-   }
-       }
-   
 
-function getMimeTypeFromUrl(url: string): string {
-    const extension = url.split('.').pop()?.toLowerCase();
-    switch (extension) {
-        case 'jpeg':
-        case 'jpg':
-            return 'image/jpeg';
-        case 'png':
-            return 'image/png';
-        default:
-            return 'image/jpeg'; // Default to JPEG if unknown
+        // Check if there's an image URL to draw
+        const imageUrl = result.imageUrl;
+        if (imageUrl) {
+            streamDeck.logger.trace("Drawing Image from URL", imageUrl);
+            fetch(imageUrl)
+                .then(res => {
+                    if (!res.body) throw new Error("No response body");
+                    return fetchToNodeReadable(res.body);
+                })
+                .then(stream => {
+                    if (imageUrl.endsWith('.png')) {
+                        return PImage.decodePNGFromStream(stream);
+                    } else if (imageUrl.endsWith('.jpg') || imageUrl.endsWith('.jpeg')) {
+                        return PImage.decodeJPEGFromStream(stream);
+                    } else {
+                        throw new Error("Unsupported image format");
+                    }
+                })
+                .then((img) => {
+                    ctx.drawImage(img, 0, 0, 144, 144); // Draw the image on the canvas
+
+                    // Convert canvas to base64 and set image
+                    const outStream = new PassThrough();
+                    PImage.encodePNGToStream(canvas, outStream)
+                        .then(() => {
+                            const jpegData: Buffer[] = [];
+                            outStream.on('data', (chunk) => jpegData.push(chunk));
+                            outStream.on('end', () => {
+                                const buf = Buffer.concat(jpegData);
+                                const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+                                streamDeck.ui.current?.action.setImage(dataUrl);
+                            });
+                        })
+                        .catch(err => {
+                            streamDeck.logger.error("Error encoding PNG to stream:", err);
+                        });
+                })
+                .catch(err => {
+                    streamDeck.logger.error("Error loading image:", err);
+                });
+        } else {
+            // If no image URL, just convert the canvas to base64 and set image
+            const outStream = new PassThrough();
+            PImage.encodePNGToStream(canvas, outStream)
+                .then(() => {
+                    const jpegData: Buffer[] = [];
+                    outStream.on('data', (chunk) => jpegData.push(chunk));
+                    outStream.on('end', () => {
+                        const buf = Buffer.concat(jpegData);
+                        const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+                        streamDeck.ui.current?.action.setImage(dataUrl);
+                    });
+                })
+                .catch(err => {
+                    streamDeck.logger.error("Error encoding PNG to stream:", err);
+                });
+        }
     }
 }
 
 function drawBackground(ctx: any) {
     PImage.decodePNGFromStream(fs.createReadStream('./imgs/plugin/bg.png')).then((bg) => {
-        ctx.drawImage(bg, 144, 144);
+        ctx.drawImage(bg, 0, 0);
     });
 }
 
@@ -232,23 +234,34 @@ function drawHeaderText(ctx: any) {
     ctx.fillText("Status", 72, 30); // Centered at the top
     //ctx.fillText("Status", 72, 50); // Centered below the first line
 }
-
 function drawStatusText(ctx: any, lines: any[]) {
     ctx.fillStyle = 'black'; // Default text color
     ctx.font = "24pt 'SourceSansPro'"; // Set font style
     ctx.textAlign = 'left'; // Align text to the left
 
-    lines.forEach(({ text, color, imageUrl}, i) => {
+    lines.forEach(({ text, color }, i) => {
         if (text) {
             ctx.fillStyle = color; // Set text color
             ctx.fillText(text, 10, 60 + 30 * i); // Draw text starting below the header
         }
-      if (imageUrl) {
-            streamDeck.logger.trace("Drawing Image from URL", imageUrl);
-            ctx.drawImage(imageUrl,0,0);
-      }
+       
     });
 }
+// Utility function to convert a Fetch API ReadableStream to a Node.js Readable stream
+function fetchToNodeReadable(fetchStream: ReadableStream<Uint8Array>): Readable {
+    const reader = fetchStream.getReader();
+    return new Readable({
+        async read() {
+            const { done, value } = await reader.read();
+            if (done) {
+                this.push(null);
+            } else {
+                this.push(Buffer.from(value));
+            }
+        }
+    });
+}
+
 
 function prepareStatusLines(result: any, fields: string[], settings: any) {
     if (settings.displayMode === 'stats') {
@@ -263,11 +276,13 @@ function prepareStatusLines(result: any, fields: string[], settings: any) {
             return { text: `${status}`, color: "#008000" };
         });
     } else if (settings.displayMode === 'username') {
-        return [
-            { text: `${result.username || 'N/A'}`, color: "#008000" },
-            { imageUrl: result.image || '', color: "yellow" }, // Ensure imageUrl is set correctly
-        ];
-    } else if (settings.displayMode === 'ship') {
+    return [
+        { text: `${result.username || 'N/A'}`, color: "#008000" },
+        { imageUrl: `${result.imageUrl || 'N/A'}` , color: "yellow" }, // Ensure imageUrl is set correctly
+    ];
+}
+
+else if (settings.displayMode === 'ship') {
         return [{ imageUrl: result.image || 'N/A' }]; // Ensure imageUrl is set correctly
     }
     return [{ text: 'N/A', color: 'white' }];
@@ -333,6 +348,7 @@ function handleError(message: string, error: any, callback: (result: any) => voi
     streamDeck.logger.error(message, error);
     callback({ error: message });
 }
+
 function getShipData(shipInfo: string, callback: (result: any) => void) {
     const endpoint = `https://api.starcitizen-api.com/${Star_Citizen_Key}/v1/live/ships?name=${shipInfo}&page_max=1`;
 

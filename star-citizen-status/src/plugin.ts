@@ -1,6 +1,6 @@
 import streamDeck, { LogLevel } from "@elgato/streamdeck";
 import * as PImage from "pureimage";
-import * as fs from "fs";
+import * as fs from 'fs';
 import { PassThrough } from "stream";
 import { Readable } from 'stream';
 import { Status } from "./actions/status";
@@ -15,31 +15,74 @@ streamDeck.actions.registerAction(new Status());
 streamDeck.connect().then(() => {
     streamDeck.logger.trace("Connected to Stream Deck");
     streamDeck.logger.trace("Global settings:", streamDeck.settings.getGlobalSettings());
+    initializePlugin();
 });
 
-const Star_Citizen_Key = "435ccc1f79cf6b3c9d5f095cf582ec0b"
+const Star_Citizen_Key = ""
 
 let intervals: { [key: string]: ReturnType<typeof setInterval> } = {};
 let stateStore: { [key: string]: any } = {}; // In-memory state store
+
+async function initializePlugin() {
+    try {
+        // Await the global settings
+        const settings = await streamDeck.settings.getGlobalSettings();
+        const lastState = loadLastState(settings);
+
+        if (lastState) {
+            updateCanvasWithStatus(lastState.result, settings, false);
+        } else {
+            // Fetch data based on displayMode
+            switch (settings.displayMode) {
+                case 'stats':
+                    getStarCitizenStats((result) => handleDataResult(result, settings));
+                    break;
+                case 'status':
+                    const fields = Array.isArray(settings.fields) 
+                    ? settings.fields.filter((field): field is string => typeof field === 'string') 
+                    : [];
+                    getStarCitizenData(fields, (result) => handleDataResult(result, settings));
+                    break;
+                case 'username':
+                    // Ensure settings.username is a string
+                    const username = typeof settings.username === 'string' ? settings.username : '';
+                    getUsernameData(username, (result) => handleDataResult(result, settings));
+                    break;
+                case 'ship':
+                    const shipInfo = typeof settings.shipInfo === 'string' ? settings.shipInfo : '';
+                    getShipData(shipInfo, (result) => handleDataResult(result, settings));
+                    break;
+                default:
+                    streamDeck.logger.error("Unknown display mode:", settings.displayMode);
+                    displayErrorMessage("Invalid Display Mode");
+            }
+        }
+    } catch (error) {
+        streamDeck.logger.error("Error initializing plugin:", error);
+    }
+}
 
 streamDeck.settings.onDidReceiveSettings((jsonObj) => {
     //streamDeck.logger.trace("ON APPEAR", jsonObj.payload.settings);
     const settings = jsonObj.payload.settings;
     streamDeck.logger.trace("Settings on did appear:", settings);
     initiateStarCitizenStatus(settings);
+    //const lastState = loadLastState(settings);
+    //updateCanvasWithStatus(lastState, settings, false);
 });
 
 streamDeck.actions.onWillAppear((jsonObj) => {
     //streamDeck.logger.trace("On Will Appear", jsonObj);
-    // const settings = jsonObj.payload.settings;
+    //const settings = jsonObj.payload.settings;
     // streamDeck.logger.trace("Settings on will appear:", jsonObj.payload.settings);
     // initiateStarCitizenStatus(settings);
     streamDeck.logger.trace("On Did Appear", jsonObj);
-    const settings = jsonObj.action.getSettings()
+   const settings = jsonObj.action.getSettings()
     const lastState = loadLastState(settings);
     if (lastState) {
         streamDeck.logger.trace("Loading last state:", lastState);
-        updateCanvasWithStatus(lastState.result, settings, false);
+        initiateStarCitizenStatus(settings);
+        //updateCanvasWithStatus(lastState.result, settings, false);
     } else {
         displayErrorMessage("Something Broke");
     }
@@ -236,12 +279,11 @@ function drawErrorMessage(ctx: any, message: string) {
     ctx.fillText(message, 72, 50);
 }
 
-
 function drawHeaderText(ctx: any) {
     ctx.fillStyle = 'white';
     ctx.textAlign = 'center';
-    ctx.fillText("Status", 72, 30); // Cente#969AE8 at the top
-    //ctx.fillText("Status", 72, 50); // Cente#969AE8 below the first line
+    ctx.fillText("Status", 72, 30); // #969AE8 at the top
+    //ctx.fillText("Status", 72, 50); // #969AE8 below the first line
 }
 
 function drawStatusText(ctx: any, lines: any[]) {
@@ -287,12 +329,19 @@ function fetchToNodeReadable(fetchStream: ReadableStream<Uint8Array>): Readable 
     });
 }
 
+function formatNumberInMillions(value: number): string {
+    if (value >= 1_000_000) {
+        return `${(value / 1_000_000).toFixed(1)}M`;
+    }
+    return value.toString();
+}
+
 function prepareStatusLines(result: any, fields: string[], settings: any) {
     if (settings.displayMode === 'stats') {
         return [
             { text: `Live: ${result.current_live || 'N/A'}`, color: "rgb(81, 174, 122)" },
-            { text: `Fans: ${result.fans || 'N/A'}`, color: "#e8944a" },
-            { text: `Funds: ${result.funds || 'N/A'}`, color: "#969AE8" }
+            { text: `Fans: ${result.fans ? formatNumberInMillions(result.fans) : 'N/A'}`, color: "#e8944a" },
+            { text: `$$$: ${result.funds ? formatNumberInMillions(result.funds) : 'N/A'}`, color: "#969AE8" }
         ];
     } else if (settings.displayMode === 'status') {
         return Object.keys(result).map(systemName => {
@@ -300,14 +349,12 @@ function prepareStatusLines(result: any, fields: string[], settings: any) {
             return { text: `${status}`, color: "rgb(81, 174, 122)" };
         });
     } else if (settings.displayMode === 'username') {
-    return [
-        { text: `${result.username || 'N/A'}`, color: "rgb(81, 174, 122)" },
-        { text: `${result.badge || 'N/A'}` , color: "#e8944a" },
-        { text: `${result.organization || 'N/A'}` , color: "#969AE8" },
-    ];
-}
-
-else if (settings.displayMode === 'ship') {
+        return [
+            { text: `${result.username || 'N/A'}`, color: "rgb(81, 174, 122)" },
+            { text: `${result.badge || 'N/A'}`, color: "#e8944a" },
+            { text: `${result.organization || 'N/A'}`, color: "#969AE8" },
+        ];
+    } else if (settings.displayMode === 'ship') {
         return [{ imageUrl: result.image || 'N/A' }]; // Ensure imageUrl is set correctly
     }
     return [{ text: 'N/A', color: 'white' }];
@@ -371,7 +418,6 @@ function getUsernameData(username: string, callback: (result: any) => void) {
         .catch(error => handleError("Failed to fetch user data", error, callback));
 }
 
-
 function handleError(message: string, error: any, callback: (result: any) => void) {
     streamDeck.logger.error(message, error);
     callback({ error: message });
@@ -408,6 +454,7 @@ function getShipData(shipInfo: string, callback: (result: any) => void) {
             callback({ error: error.message });
         });
 }
+
 function saveLastState(result: any, settings: any) {
     const state = { result, settings };
     stateStore[settings] = state; // Save to in-memory store

@@ -4,6 +4,24 @@
     <meta charset="utf-8"/>
     <title>Settings</title>
     <script src="https://sdpi-components.dev/releases/v3/sdpi-components.js"></script>
+    <style>
+        .sdpi-textfield {
+            background: #222;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 15px;
+            width: 100%;
+            box-sizing: border-box;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .sdpi-textfield:focus {
+            border-color: #969AE8;
+            background: #181a1b;
+        }
+    </style>
 </head>
 <body>
     <sdpi-item label="Automatic Refresh">
@@ -22,12 +40,12 @@
     </sdpi-item>
 
     <sdpi-item label="Username">
-        <sdpi-textfield id="username" setting="username" placeholder="Enter Username"></sdpi-textfield>
+        <input type="text" class="sdpi-textfield" id="username" placeholder="Enter Username">
         <sdpi-button id="usernameBtn">Search</sdpi-button>
     </sdpi-item>
 
     <sdpi-item label="Ship Photo">
-        <sdpi-textfield id="shipInfo" setting="shipInfo" placeholder="Enter Ship Info"></sdpi-textfield>
+        <input type="text" class="sdpi-textfield" id="shipInfo" placeholder="Enter Ship Info">
         <sdpi-button id="shipInfoBtn">View</sdpi-button>
     </sdpi-item>
 
@@ -66,21 +84,12 @@
 
             if (usernameButton) {
                 usernameButton.addEventListener('click', function () {
-                    if (usernameSelect) {
-                        const selectedValue = usernameSelect.value;
-                        const settings = {
-                            username: selectedValue,
-                            displayMode: 'username',
-                            // Add other settings if needed
-                        };
-
-                        console.log("Updating settings with display mode:", selectedValue);
-                        // Send the updated settings to the plugin
-                        const { streamDeckClient } = SDPIComponents;
-                        streamDeckClient.setSettings(settings);
-                    } else {
-                        console.error("Dropdown element not found");
-                    }
+                    const username = document.getElementById('username').value;
+                    const settings = {
+                        username,
+                        displayMode: 'username'
+                    };
+                    SDPIComponents.streamDeckClient.setSettings(settings);
                 });
             } else {
                 console.error("Update button not found");
@@ -88,21 +97,12 @@
 
             if (shipInfoButton) {
                 shipInfoButton.addEventListener('click', function () {
-                    if (shipInfoSelect) {
-                        const selectedValue = shipInfoSelect.value;
-                        const settings = {
-                            shipInfo: selectedValue,
-                            displayMode: 'ship'
-                            // Add other settings if needed
-                        };
-
-                        console.log("Updating settings with display mode:", selectedValue);
-                        // Send the updated settings to the plugin
-                        const { streamDeckClient } = SDPIComponents;
-                        streamDeckClient.setSettings(settings);
-                    } else {
-                        console.error("Dropdown element not found");
-                    }
+                    const shipInfo = document.getElementById('shipInfo').value;
+                    const settings = {
+                        shipInfo,
+                        displayMode: 'ship'
+                    };
+                    SDPIComponents.streamDeckClient.setSettings(settings);
                 });
             } else {
                 console.error("Update button not found");

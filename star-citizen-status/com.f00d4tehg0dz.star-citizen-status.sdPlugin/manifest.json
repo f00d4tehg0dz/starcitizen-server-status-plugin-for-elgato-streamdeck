@@ -1,6 +1,6 @@
 {
 	"Name": "Star Citizen Status",
-	"Version": "0.2.0.0",
+	"Version": "0.5.0.0",
 	"Author": "f00d4tehg0dz",
 	"Actions": [
 		{
@@ -14,8 +14,8 @@
 			],
 			"States": [
 				{
-					"Image": "imgs/actions/status/key",
-					"TitleAlignment": "middle"
+					"TitleAlignment": "middle",
+					"Image": "imgs/actions/status/icon"
 				}
 			]
 		}

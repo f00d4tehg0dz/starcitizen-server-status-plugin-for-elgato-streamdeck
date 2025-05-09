@@ -1,9 +1,62 @@
 import streamDeck, { LogLevel } from "@elgato/streamdeck";
 import * as PImage from "pureimage";
 import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { PassThrough } from "stream";
 import { Readable } from 'stream';
 import { Status } from "./actions/status";
+
+// Convert import.meta.url to a file path
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const stateFilePath = path.join(__dirname, 'state.json');
+
+// Global refresh interval
+let globalRefreshInterval: NodeJS.Timeout | null = null;
+
+function saveLastState(result: any, settings: any) {
+    const state = { result, settings };
+    try {
+        fs.writeFileSync(stateFilePath, JSON.stringify(state, null, 2));
+        streamDeck.logger.trace("Saved last state:", state);
+    } catch (error) {
+        streamDeck.logger.error("Error saving state:", error);
+    }
+}
+
+async function loadLastState() {
+    try {
+        // Always return status mode settings
+        return {
+            result: {
+                "Platform": "Loading...",
+                "Persistent Universe": "Loading...",
+                "Arena Commander": "Loading..."
+            },
+            settings: {
+                displayMode: 'status',
+                fields: [],
+                automaticRefresh: true
+            }
+        };
+    } catch (error) {
+        streamDeck.logger.error("Error loading last state:", error);
+        return {
+            result: {
+                "Platform": "Loading...",
+                "Persistent Universe": "Loading...",
+                "Arena Commander": "Loading..."
+            },
+            settings: {
+                displayMode: 'status',
+                fields: [],
+                automaticRefresh: true
+            }
+        };
+    }
+}
 
 // Enable "trace" logging
 streamDeck.logger.setLevel(LogLevel.TRACE);
@@ -15,91 +68,203 @@ streamDeck.actions.registerAction(new Status());
 streamDeck.connect().then(() => {
     streamDeck.logger.trace("Connected to Stream Deck");
     streamDeck.logger.trace("Global settings:", streamDeck.settings.getGlobalSettings());
+  
+    // Initialize the plugin and show status immediately
     initializePlugin();
+    
+    // Start the global refresh mechanism
+    startGlobalRefresh();
+    
+    // Force status display for the current action
+    if (streamDeck.ui.current?.action) {
+        const settings = {
+            displayMode: 'status',
+            fields: [],
+            automaticRefresh: true
+        };
+        streamDeck.ui.current.action.setSettings(settings);
+        updateStarCitizenStatus(settings);
+    }
 });
 
-const Star_Citizen_Key = ""
+// Function to start global refresh that doesn't depend on action selection
+function startGlobalRefresh() {
+    if (globalRefreshInterval) {
+        clearInterval(globalRefreshInterval);
+    }
+    
+    globalRefreshInterval = setInterval(() => {
+        streamDeck.logger.trace("Global refresh running");
+        
+        // Fetch and update all actions
+        const actions = streamDeck.actions;
+        streamDeck.logger.trace(`Found ${actions.length} actions to refresh`);
+        
+        // Update each action with new data
+        actions.forEach(action => {
+            if (action.isKey()) {
+                action.getSettings().then(settings => {
+                    // Respect the current display mode and refresh accordingly
+                    const displayMode = settings.displayMode || 'status';
+                    
+                    switch (displayMode) {
+                        case 'stats':
+                            getStarCitizenStats((result) => {
+                                streamDeck.logger.trace(`Updating action ${action.id} with stats`);
+                                if (result.error) {
+                                    streamDeck.logger.error("Error fetching stats:", result.error);
+                                } else {
+                                    saveLastState(result, settings);
+                                    updateCanvasWithStatus(result, settings, true, action);
+                                }
+                            });
+                            break;
+                        case 'status':
+                            getStarCitizenData(safeGetFields(settings), (result) => {
+                                streamDeck.logger.trace(`Updating action ${action.id} with status`);
+                                if (result.error) {
+                                    streamDeck.logger.error("Error fetching data:", result.error);
+                                } else {
+                                    saveLastState(result, settings);
+                                    updateCanvasWithStatus(result, settings, true, action);
+                                }
+                            });
+                            break;
+                        case 'username':
+                            if (settings.username) {
+                                getUsernameData(String(settings.username), (result) => {
+                                    streamDeck.logger.trace(`Updating action ${action.id} with username data`);
+                                    if (result.error) {
+                                        streamDeck.logger.error("Error fetching username data:", result.error);
+                                    } else {
+                                        saveLastState(result, settings);
+                                        updateCanvasWithStatus(result, settings, true, action);
+                                    }
+                                });
+                            }
+                            break;
+                        case 'ship':
+                            if (settings.shipInfo) {
+                                getShipData(String(settings.shipInfo), (result) => {
+                                    streamDeck.logger.trace(`Updating action ${action.id} with ship data`);
+                                    if (result.error) {
+                                        streamDeck.logger.error("Error fetching ship data:", result.error);
+                                    } else {
+                                        saveLastState(result, settings);
+                                        updateCanvasWithStatus(result, settings, true, action);
+                                    }
+                                });
+                            }
+                            break;
+                        default:
+                            // Default to status mode if unknown mode
+                            getStarCitizenData(safeGetFields(settings), (result) => {
+                                streamDeck.logger.trace(`Updating action ${action.id} with default status`);
+                                if (result.error) {
+                                    streamDeck.logger.error("Error fetching data:", result.error);
+                                } else {
+                                    saveLastState(result, settings);
+                                    updateCanvasWithStatus(result, settings, true, action);
+                                }
+                            });
+                    }
+                }).catch(err => {
+                    streamDeck.logger.error(`Error getting settings for action ${action.id}:`, err);
+                });
+            }
+        });
+    }, 60000); // Every 1 minute
+    
+    streamDeck.logger.trace("Global refresh started");
+}
+
+const Star_Citizen_Key = "435ccc1f79cf6b3c9d5f095cf582ec0b"
 
 let intervals: { [key: string]: ReturnType<typeof setInterval> } = {};
-let stateStore: { [key: string]: any } = {}; // In-memory state store
 
-async function initializePlugin() {
-    try {
-        // Await the global settings
-        const settings = await streamDeck.settings.getGlobalSettings();
-        const lastState = loadLastState(settings);
-
-        if (lastState) {
-            updateCanvasWithStatus(lastState.result, settings, false);
-        } else {
-            // Fetch data based on displayMode
-            switch (settings.displayMode) {
-                case 'stats':
-                    getStarCitizenStats((result) => handleDataResult(result, settings));
-                    break;
-                case 'status':
-                    const fields = Array.isArray(settings.fields) 
-                    ? settings.fields.filter((field): field is string => typeof field === 'string') 
-                    : [];
-                    getStarCitizenData(fields, (result) => handleDataResult(result, settings));
-                    break;
-                case 'username':
-                    // Ensure settings.username is a string
-                    const username = typeof settings.username === 'string' ? settings.username : '';
-                    getUsernameData(username, (result) => handleDataResult(result, settings));
-                    break;
-                case 'ship':
-                    const shipInfo = typeof settings.shipInfo === 'string' ? settings.shipInfo : '';
-                    getShipData(shipInfo, (result) => handleDataResult(result, settings));
-                    break;
-                default:
-                    streamDeck.logger.error("Unknown display mode:", settings.displayMode);
-                    displayErrorMessage("Invalid Display Mode");
+function initializePlugin() {
+    loadLastState()
+        .then(lastState => {
+            // Instead of relying on streamDeck.ui.current, update all visible actions
+            const actions = streamDeck.actions;
+            if (actions.length > 0) {
+                for (const action of actions) {
+                    if (action.isKey()) {
+                        updateCanvasWithStatus({
+                            "Platform": "Loading...",
+                            "Persistent Universe": "Loading...",
+                            "Arena Commander": "Loading..."
+                        }, lastState.settings, false, action);
+                    }
+                }
             }
-        }
-    } catch (error) {
-        streamDeck.logger.error("Error initializing plugin:", error);
-    }
+            
+            streamDeck.logger.trace("Set loading status in UI");
+            
+            // Immediately fetch data
+            getStarCitizenData([], (result) => {
+                handleDataResult(result, lastState.settings);
+            });
+        })
+        .catch(error => {
+            streamDeck.logger.error("Error initializing plugin:", error);
+        });
 }
 
 streamDeck.settings.onDidReceiveSettings((jsonObj) => {
-    //streamDeck.logger.trace("ON APPEAR", jsonObj.payload.settings);
     const settings = jsonObj.payload.settings;
-    streamDeck.logger.trace("Settings on did appear:", settings);
-    initiateStarCitizenStatus(settings);
-    //const lastState = loadLastState(settings);
-    //updateCanvasWithStatus(lastState, settings, false);
+    streamDeck.logger.trace("Received settings:", settings);
+    
+    // If automaticRefresh is explicitly false, we're in editing mode
+    if (settings.automaticRefresh === false) {
+        streamDeck.logger.trace("Edit mode detected - not refreshing");
+        return; // Skip refresh in editing mode
+    }
+    
+    initiateStarCitizenStatus(settings);  
 });
 
+streamDeck.settings.onDidReceiveGlobalSettings((jsonObj) => {
+    const settings = jsonObj.settings;
+    streamDeck.logger.trace("Settings on did receive global settings:", settings);
+    initiateStarCitizenStatus(settings);
+})
+
 streamDeck.actions.onWillAppear((jsonObj) => {
-    //streamDeck.logger.trace("On Will Appear", jsonObj);
-    //const settings = jsonObj.payload.settings;
-    // streamDeck.logger.trace("Settings on will appear:", jsonObj.payload.settings);
-    // initiateStarCitizenStatus(settings);
-    streamDeck.logger.trace("On Did Appear", jsonObj);
-   const settings = jsonObj.action.getSettings()
-    const lastState = loadLastState(settings);
-    if (lastState) {
+    streamDeck.logger.trace("On Will Appear", jsonObj);
+    const settings = jsonObj.action.getSettings();
+    const lastState = loadLastState();
+    if (lastState && typeof lastState === 'object' && 'result' in lastState) {
         streamDeck.logger.trace("Loading last state:", lastState);
-        initiateStarCitizenStatus(settings);
-        //updateCanvasWithStatus(lastState.result, settings, false);
+        updateCanvasWithStatus(lastState.result, settings, false, jsonObj.action);
     } else {
-        displayErrorMessage("Something Broke");
+        displayErrorMessage("Something Broke", jsonObj.action);
     }
 });
 
-// streamDeck.ui.onDidAppear((jsonObj) => {
-//     streamDeck.logger.trace("On Did Appear", jsonObj);
-//     const settings = jsonObj.action.getSettings()
-//     const lastState = loadLastState(settings);
-//     if (lastState) {
-//         streamDeck.logger.trace("Loading last state:", lastState);
-//         updateCanvasWithStatus(lastState.result, settings, false);
-//     } else {
-//         displayErrorMessage("Something Broke");
-//     }
+streamDeck.actions.onTitleParametersDidChange((jsonObj) => {
+    streamDeck.logger.trace("On Title Parameters Did Change", jsonObj);
+    const settings = jsonObj.action.getSettings()
+    const lastState = loadLastState();
+    if (lastState && typeof lastState === 'object' && 'result' in lastState) {
+        streamDeck.logger.trace("Loading last state:", lastState);
+        updateCanvasWithStatus(lastState.result, settings, false, jsonObj.action);
+    } else {
+        displayErrorMessage("Something Broke", jsonObj.action);
+    }
+})
 
-// });
+streamDeck.ui.onDidAppear((jsonObj) => {
+    streamDeck.logger.trace("On Did Appear", jsonObj);
+    const settings = jsonObj.action.getSettings()
+    const lastState = loadLastState();
+    if (lastState && typeof lastState === 'object' && 'result' in lastState) {
+        streamDeck.logger.trace("Loading last state:", lastState);
+        updateCanvasWithStatus(lastState.result, settings, false, jsonObj.action);
+    } else {
+        displayErrorMessage("Something Broke", jsonObj.action);
+    }
+});
 
 streamDeck.actions.onKeyUp((jsonObj) => {
     streamDeck.logger.trace("Received keyUp event:", jsonObj);
@@ -108,19 +273,21 @@ streamDeck.actions.onKeyUp((jsonObj) => {
     initiateStarCitizenStatus(settings);
 });
 
-function initiateStarCitizenStatus(settings: any) {
-    streamDeck.logger.trace(`Display Mode: ${settings.displayMode}`);
+export async function initiateStarCitizenStatus(settings: any) {
+    streamDeck.logger.trace(`Display Mode!: ${settings.displayMode}`);
     settings.displayMode = settings.displayMode || 'status'; // Default to 'status' if not set
     streamDeck.logger.trace(`Initiating StarCitizen status for context:`, settings);
     clearInterval(intervals[settings]);
     updateStarCitizenStatus(settings);
-    if (settings.automaticRefresh) {
-        streamDeck.logger.trace(`Setting automatic refresh for context: ${settings}`);
-        intervals[settings] = setInterval(() => updateStarCitizenStatus(settings), 5 * 60 * 1000); // 5 minutes
-    }
 }
 
-function updateStarCitizenStatus(settings: any) {
+export async function updateStarCitizenStatus(settings: any) {
+    // Skip updates if automaticRefresh is explicitly set to false
+    if (settings.automaticRefresh === false) {
+        streamDeck.logger.trace("Skipping auto refresh - disabled by user");
+        return;
+    }
+
     streamDeck.logger.trace(`Updating StarCitizen status for context:`, settings.displayMode);
     setTitle("Updating");
     // Determine which data to fetch based on settings
@@ -129,17 +296,18 @@ function updateStarCitizenStatus(settings: any) {
             getStarCitizenStats((result) => handleDataResult(result, settings));
             break;
         case 'status':
-            getStarCitizenData(settings.fields, (result) => handleDataResult(result, settings));
+            getStarCitizenData(safeGetFields(settings), (result) => handleDataResult(result, settings));
             break;
         case 'username':
-            getUsernameData(settings.username, (result) => handleDataResult(result, settings));
+            getUsernameData(String(settings.username), (result) => handleDataResult(result, settings));
             break;
         case 'ship':
-            getShipData(settings.shipInfo, (result) => handleDataResult(result, settings));
+            getShipData(String(settings.shipInfo), (result) => handleDataResult(result, settings));
             break;
         default:
             streamDeck.logger.error("Unknown display mode:", settings.displayMode);
             clearTitle();
+            getStarCitizenData(safeGetFields(settings), (result) => handleDataResult(result, settings));
             displayErrorMessage("Invalid Display Mode");
     }
 }
@@ -149,8 +317,8 @@ function handleDataResult(result: any, settings: any) {
     clearTitle();
     if (result.error) {
         streamDeck.logger.error("Error fetching data:", result.error);
-        const lastState = loadLastState(settings);
-        if (lastState) {
+        const lastState = loadLastState();
+        if (lastState && typeof lastState === 'object' && 'result' in lastState) {
             //streamDeck.logger.trace("Loading last state:", lastState);
             updateCanvasWithStatus(lastState.result, settings, false);
         } else {
@@ -158,16 +326,33 @@ function handleDataResult(result: any, settings: any) {
         }
     } else {
         saveLastState(result, settings);
-        updateCanvasWithStatus(result, settings, true);
+        
+        // Try to update all actions with the new data
+        const actions = streamDeck.actions;
+        if (actions.length > 0) {
+            for (const action of actions) {
+                if (action.isKey()) {
+                    updateCanvasWithStatus(result, settings, true, action);
+                }
+            }
+        } else {
+            // Fall back to the old method if no actions are found
+            updateCanvasWithStatus(result, settings, true);
+        }
     }
 }
 
-function displayErrorMessage(message: string) {
+function displayErrorMessage(message: string, specificAction?: any) {
     const canvas = PImage.make(144, 144);
     const ctx = canvas.getContext('2d');
     if (ctx) {
-        drawBackground(ctx);
-        drawErrorMessage(ctx, message);
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, 144, 144);
+        ctx.fillStyle = '#969AE8';
+        ctx.font = 'bold 16pt SourceSansPro';
+        ctx.textAlign = 'center';
+        ctx.fillText(message, 72, 72);
+        
         const outStream = new PassThrough();
         PImage.encodePNGToStream(canvas, outStream).then(() => {
             const jpegData: Buffer[] = [];
@@ -175,31 +360,54 @@ function displayErrorMessage(message: string) {
             outStream.on('end', () => {
                 const buf = Buffer.concat(jpegData);
                 const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
-                streamDeck.ui.current?.action.setImage(dataUrl);
+                
+                if (specificAction && specificAction.isKey && specificAction.isKey()) {
+                    specificAction.setImage(dataUrl);
+                } else if (streamDeck.ui.current?.action) {
+                    streamDeck.ui.current.action.setImage(dataUrl);
+                } else {
+                    // Try to update all visible actions
+                    const actions = streamDeck.actions;
+                    if (actions.length > 0) {
+                        for (const action of actions) {
+                            if (action.isKey()) {
+                                action.setImage(dataUrl);
+                            }
+                        }
+                    }
+                }
             });
         });
     }
 }
 
 function setTitle(title: string) {
-    streamDeck.ui.current?.action.setTitle(title);
+    if (streamDeck.ui.current?.action) {
+        streamDeck.ui.current.action.setTitle(title);
+    }
 }
 
 function clearTitle() {
-    streamDeck.ui.current?.action.setTitle("");
+    if (streamDeck.ui.current?.action) {
+        streamDeck.ui.current.action.setTitle("");
+    }
 }
 
 // Register and load the font
 const font = PImage.registerFont("./font/source-sans-pro-regular.ttf", "SourceSansPro");
 font.loadSync();
 
-function updateCanvasWithStatus(result: any, settings: any, isNew: boolean) {
+function updateCanvasWithStatus(result: any, settings: any, isNew: boolean, specificAction?: any) {
+    streamDeck.logger.trace("Updating canvas with status:", { resultKeys: Object.keys(result), settings });
+    
     const statusLines = prepareStatusLines(result, settings.fields, settings);
     const canvas = PImage.make(144, 144);
     const ctx = canvas.getContext('2d');
 
     if (ctx) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'black'; // Set background color
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.font = "20pt 'SourceSansPro'";
 
         drawHeaderText(ctx);
@@ -210,80 +418,86 @@ function updateCanvasWithStatus(result: any, settings: any, isNew: boolean) {
         const imageUrl = result.imageUrl;
         if (imageUrl) {
             streamDeck.logger.trace("Drawing Image from URL", imageUrl);
-            fetch(imageUrl)
-                .then(res => {
-                    if (!res.body) throw new Error("No response body");
-                    return fetchToNodeReadable(res.body);
-                })
-                .then(stream => {
-                    if (imageUrl.endsWith('.png')) {
-                        return PImage.decodePNGFromStream(stream);
-                    } else if (imageUrl.endsWith('.jpg') || imageUrl.endsWith('.jpeg')) {
-                        return PImage.decodeJPEGFromStream(stream);
-                    } else {
-                        throw new Error("Unsupported image format");
-                    }
-                })
-                .then((img) => {
-                    ctx.drawImage(img, 0, 0, 144, 144); // Draw the image on the canvas
-
-                    // Convert canvas to base64 and set image
-                    const outStream = new PassThrough();
-                    PImage.encodePNGToStream(canvas, outStream)
-                        .then(() => {
-                            const jpegData: Buffer[] = [];
-                            outStream.on('data', (chunk) => jpegData.push(chunk));
-                            outStream.on('end', () => {
-                                const buf = Buffer.concat(jpegData);
-                                const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
-                                streamDeck.ui.current?.action.setImage(dataUrl);
-                            });
-                        })
-                        .catch(err => {
-                            streamDeck.logger.error("Error encoding PNG to stream:", err);
-                        });
-                })
-                .catch(err => {
-                    streamDeck.logger.error("Error loading image:", err);
-                });
-        } else {
-            // If no image URL, just convert the canvas to base64 and set image
-            const outStream = new PassThrough();
-            PImage.encodePNGToStream(canvas, outStream)
-                .then(() => {
-                    const jpegData: Buffer[] = [];
-                    outStream.on('data', (chunk) => jpegData.push(chunk));
-                    outStream.on('end', () => {
-                        const buf = Buffer.concat(jpegData);
-                        const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
-                        streamDeck.ui.current?.action.setImage(dataUrl);
+            
+            try {
+                fetch(imageUrl)
+                    .then(res => {
+                        if (!res.body) throw new Error("No response body");
+                        return fetchToNodeReadable(res.body);
+                    })
+                    .then(stream => {
+                        if (imageUrl.endsWith('.png')) {
+                            return PImage.decodePNGFromStream(stream);
+                        } else if (imageUrl.endsWith('.jpg') || imageUrl.endsWith('.jpeg')) {
+                            return PImage.decodeJPEGFromStream(stream);
+                        } else {
+                            throw new Error("Unsupported image format");
+                        }
+                    })
+                    .then((img) => {
+                        ctx.drawImage(img, 0, 0, 144, 144); // Draw the image on the canvas
+                        // Now encode and set the image with the specific action if available
+                        setImageFromCanvas(canvas, specificAction);
+                    })
+                    .catch(err => {
+                        streamDeck.logger.error("Error loading image:", err);
+                        // Fall back to setting the image without the loaded image
+                        setImageFromCanvas(canvas, specificAction);
                     });
-                })
-                .catch(err => {
-                    streamDeck.logger.error("Error encoding PNG to stream:", err);
-                });
+            } catch (err) {
+                streamDeck.logger.error("Error loading image:", err);
+                setImageFromCanvas(canvas, specificAction);
+            }
+        } else {
+            // No image URL, just set the image directly
+            setImageFromCanvas(canvas, specificAction);
         }
     }
 }
 
-function drawBackground(ctx: any) {
-    PImage.decodePNGFromStream(fs.createReadStream('./imgs/plugin/bg.png')).then((bg) => {
-        ctx.drawImage(bg, 0, 0);
-    });
-}
-
-function drawErrorMessage(ctx: any, message: string) {
-    ctx.fillStyle = '#969AE8';
-    ctx.font = 'bold 20pt SourceSansPro';
-    ctx.clearRect(0, 0, 144, 144);
-    ctx.fillText(message, 72, 50);
+// Helper function to set the image from canvas
+function setImageFromCanvas(canvas: any, specificAction?: any) {
+    const outStream = new PassThrough();
+    PImage.encodePNGToStream(canvas, outStream)
+        .then(() => {
+            const jpegData: Buffer[] = [];
+            outStream.on('data', (chunk) => jpegData.push(chunk));
+            outStream.on('end', () => {
+                const buf = Buffer.concat(jpegData);
+                const dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+                
+                // Set the image on the specific action if provided
+                if (specificAction && specificAction.isKey && specificAction.isKey()) {
+                    specificAction.setImage(dataUrl);
+                    return;
+                }
+                
+                // Otherwise, set on current UI action if available
+                if (streamDeck.ui.current?.action) {
+                    streamDeck.ui.current.action.setImage(dataUrl);
+                    return;
+                }
+                
+                // Last resort: try to update all visible actions
+                const actions = streamDeck.actions;
+                if (actions.length > 0) {
+                    for (const action of actions) {
+                        if (action.isKey()) {
+                            action.setImage(dataUrl);
+                        }
+                    }
+                }
+            });
+        })
+        .catch(err => {
+            streamDeck.logger.error("Error encoding PNG to stream:", err);
+        });
 }
 
 function drawHeaderText(ctx: any) {
     ctx.fillStyle = 'white';
     ctx.textAlign = 'center';
     ctx.fillText("Status", 72, 30); // #969AE8 at the top
-    //ctx.fillText("Status", 72, 50); // #969AE8 below the first line
 }
 
 function drawStatusText(ctx: any, lines: any[]) {
@@ -299,17 +513,17 @@ function drawStatusText(ctx: any, lines: any[]) {
         "partial": "#e8944a" // orange
     };
 
-    lines.forEach(({ text, color, imageUrl }, i) => {
+    // Only show first 3 lines to avoid overflow
+    const visibleLines = lines.slice(0, 3);
+    
+    visibleLines.forEach(({ text, color, imageUrl }, i) => {
         if (text) {
             // Determine the color based on the text content
             const lowerText = text.toLowerCase();
-            const textColor = colorProfile[lowerText] || color; // Use default color if no match
+            const textColor = colorProfile[lowerText] || color || 'white'; // Use default color if no match
 
             ctx.fillStyle = textColor; // Set text color
             ctx.fillText(text, 12, 60 + 30 * i); // Draw text starting below the header
-        }
-        if (imageUrl) {
-            // Handle image drawing logic here if needed
         }
     });
 }
@@ -406,11 +620,7 @@ function getUsernameData(username: string, callback: (result: any) => void) {
                 const userProfile = data.data.profile;
                 const userBadge = userProfile.badge;
                 const userOrg = data.data.organization.name;
-                //  const userImage = userProfile.image; // Extract the user's profile image URL
-
-                // Pass the image URL directly to the callback
                 callback({ username, badge: userBadge, organization: userOrg });
-                //callback({ username, imageUrl: userImage });
             } else {
                 callback({ error: "User not found" });
             }
@@ -436,8 +646,6 @@ function getShipData(shipInfo: string, callback: (result: any) => void) {
                     if (avatarPath) {
                         const avatarUrl = `${avatarPath}`; // Ensure full URL
                         streamDeck.logger.trace("Avatar URL:", avatarUrl);
-                        
-                        // Pass the avatar URL directly to the callback
                         callback({ shipName: ship.name, imageUrl: avatarUrl });
                     } else {
                         callback({ error: "Avatar image not found" });
@@ -455,14 +663,14 @@ function getShipData(shipInfo: string, callback: (result: any) => void) {
         });
 }
 
-function saveLastState(result: any, settings: any) {
-    const state = { result, settings };
-    stateStore[settings] = state; // Save to in-memory store
-    //streamDeck.logger.trace("Saved last state:", state);
+// Helper function to safely get fields as string array
+function safeGetFields(settings: any): string[] {
+    if (settings && settings.fields && Array.isArray(settings.fields)) {
+        // Ensure all elements are strings
+        return settings.fields.map((field: any) => String(field));
+    }
+    return [];
 }
 
-function loadLastState(settings: any) {
-    const state = stateStore[settings] || null; // Retrieve from in-memory store
-    //streamDeck.logger.trace("Loaded last state:", state);
-    return state;
-}
+// start plugin
+initializePlugin();
